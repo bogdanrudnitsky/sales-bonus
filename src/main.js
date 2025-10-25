@@ -1,44 +1,51 @@
-// Функция для расчета выручки от одной позиции в чеке
 function calculateSimpleRevenue(purchase, _product) {
-    const discountMultiplier = 1 - ((purchase.discount || 0) / 100);
-    const revenue = purchase.sale_price * purchase.quantity * discountMultiplier;
-    return revenue;
+    // считаем выручку с учётом скидки
+    const discount = purchase.discount ? purchase.discount / 100 : 0;
+    const priceAfterDiscount = purchase.sale_price * (1 - discount);
+    return priceAfterDiscount * purchase.quantity;
 }
 
-// Функция для расчета бонуса на основе позиции в рейтинге по прибыли
 function calculateBonusByProfit(index, total, seller) {
-    const { profit } = seller;
+    // определяем процент бонуса по месту в рейтинге
+    const profit = seller.profit;
+    let bonusRate = 0;
 
     if (index === 0) {
-        return profit * 0.15;
+        bonusRate = 0.15;
     } else if (index === 1 || index === 2) {
-        return profit * 0.10;
+        bonusRate = 0.10;
     } else if (index === total - 1) {
-        return 0;
+        bonusRate = 0;
     } else {
-        return profit * 0.05;
+        bonusRate = 0.05;
     }
+
+    return profit * bonusRate;
 }
 
-// Главная функция анализа данных о продажах
 function analyzeSalesData(data, options) {
-    console.log('=== НАЧАЛО АНАЛИЗА ===');
-
-    // Базовая проверка данных
-    if (!data || !data.sellers || !data.products || !data.purchase_records) {
-        console.error('Отсутствуют необходимые данные');
-        return [];
+    // проверяем входные данные
+    if (
+        !data ||
+        !Array.isArray(data.sellers) ||
+        !Array.isArray(data.products) ||
+        !Array.isArray(data.purchase_records)
+    ) {
+        throw new Error('некорректные данные');
     }
 
-    // Проверка опций
-    if (!options || typeof options.calculateRevenue !== 'function' || typeof options.calculateBonus !== 'function') {
-        console.error('Некорректные опции');
-        return [];
+    // проверяем функции расчёта
+    if (
+        !options ||
+        typeof options.calculateRevenue !== 'function' ||
+        typeof options.calculateBonus !== 'function'
+    ) {
+        throw new Error('некорректные функции расчёта');
     }
 
     const { calculateRevenue, calculateBonus } = options;
 
-    // Создаем базовую статистику продавцов
+    // создаём статистику по каждому продавцу
     const sellerStats = data.sellers.map(seller => ({
         id: seller.id,
         name: `${seller.first_name} ${seller.last_name}`,
@@ -48,86 +55,55 @@ function analyzeSalesData(data, options) {
         products_sold: {}
     }));
 
-    console.log('Создано статистик:', sellerStats.length);
+    // индексы для быстрого доступа
+    const sellerById = Object.fromEntries(sellerStats.map(s => [s.id, s]));
+    const productBySku = Object.fromEntries(data.products.map(p => [p.sku, p]));
 
-    // Создаем простые индексы
-    const sellerIndex = {};
-    sellerStats.forEach(seller => {
-        sellerIndex[seller.id] = seller;
-    });
+    // проходим по всем продажам
+    data.purchase_records.forEach(record => {
+        const seller = sellerById[record.seller_id];
+        if (!seller) return;
 
-    const productIndex = {};
-    data.products.forEach(product => {
-        productIndex[product.sku] = product;
-    });
+        seller.sales_count++;
 
-    console.log('Индексы созданы');
+        record.items.forEach(item => {
+            const product = productBySku[item.sku];
+            if (!product) return;
 
-    // Обрабатываем продажи
-    try {
-        data.purchase_records.forEach((record, recordIndex) => {
-            const seller = sellerIndex[record.seller_id];
+            const revenue = calculateRevenue(item, product);
+            const cost = product.purchase_price * item.quantity;
+            const profit = revenue - cost;
 
-            if (!seller) {
-                console.log('Продавец не найден:', record.seller_id);
-                return;
-            }
+            seller.revenue += revenue;
+            seller.profit += profit;
 
-            seller.sales_count += 1;
-
-            record.items.forEach(item => {
-                const product = productIndex[item.sku];
-
-                if (!product) {
-                    console.log('Товар не найден:', item.sku);
-                    return;
-                }
-
-                const itemRevenue = calculateRevenue(item, product);
-                const itemCost = product.purchase_price * item.quantity;
-                const itemProfit = itemRevenue - itemCost;
-
-                seller.revenue += itemRevenue;
-                seller.profit += itemProfit;
-
-                if (!seller.products_sold[item.sku]) {
-                    seller.products_sold[item.sku] = 0;
-                }
-                seller.products_sold[item.sku] += item.quantity;
-            });
+            seller.products_sold[item.sku] = (seller.products_sold[item.sku] || 0) + item.quantity;
         });
-    } catch (error) {
-        console.error('Ошибка при обработке продаж:', error);
-        return [];
-    }
+    });
 
-    console.log('Продажи обработаны');
-
-    // Сортируем по прибыли
+    // сортируем продавцов по прибыли
     sellerStats.sort((a, b) => b.profit - a.profit);
 
-    // Рассчитываем бонусы и формируем топ товаров
+    // считаем бонусы и топ-товары
     sellerStats.forEach((seller, index) => {
         seller.bonus = calculateBonus(index, sellerStats.length, seller);
 
-        seller.top_products = Object.entries(seller.products_sold)
+        const sortedProducts = Object.entries(seller.products_sold)
             .map(([sku, quantity]) => ({ sku, quantity }))
             .sort((a, b) => b.quantity - a.quantity)
             .slice(0, 10);
+
+        seller.top_products = sortedProducts;
     });
 
-    // Формируем результат
-    const result = sellerStats.map(seller => ({
+    // формируем итоговый отчёт
+    return sellerStats.map(seller => ({
         seller_id: seller.id,
         name: seller.name,
-        revenue: Math.round(seller.revenue * 100) / 100,
-        profit: Math.round(seller.profit * 100) / 100,
+        revenue: +seller.revenue.toFixed(2),
+        profit: +seller.profit.toFixed(2),
         sales_count: seller.sales_count,
         top_products: seller.top_products,
-        bonus: Math.round(seller.bonus * 100) / 100
+        bonus: +seller.bonus.toFixed(2)
     }));
-
-    console.log('=== АНАЛИЗ ЗАВЕРШЕН ===');
-    console.log('Результат:', result);
-    return result;
 }
