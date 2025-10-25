@@ -40,8 +40,8 @@ function analyzeSalesData(data, options) {
     const sellerStats = data.sellers.map(seller => ({
         id: seller.id,
         name: `${seller.first_name} ${seller.last_name}`,
-        revenue_cents: 0,
-        profit_cents: 0,
+        revenue: 0, // Используем рубли вместо копеек
+        profit: 0,  // Используем рубли вместо копеек
         sales_count: 0,
         products_sold: {}
     }));
@@ -59,25 +59,29 @@ function analyzeSalesData(data, options) {
             const product = productBySku[item.sku];
             if (!product) return;
 
-            const revenueRub = calculateRevenue(item, product);
-            const costRub = product.purchase_price * item.quantity;
-            const profitRub = revenueRub - costRub;
+            const revenue = calculateRevenue(item, product);
+            const cost = product.purchase_price * item.quantity;
+            const profit = revenue - cost;
 
-            const revenueCents = Math.round(revenueRub * 100);
-            const costCents = Math.round(costRub * 100);
-            const profitCents = revenueCents - costCents;
-
-            seller.revenue_cents += revenueCents;
-            seller.profit_cents += profitCents;
+            seller.revenue += revenue;
+            seller.profit += profit;
 
             seller.products_sold[item.sku] = (seller.products_sold[item.sku] || 0) + item.quantity;
         });
     });
 
-    sellerStats.sort((a, b) => b.profit_cents - a.profit_cents);
+    // Сортируем по убыванию прибыли
+    sellerStats.sort((a, b) => b.profit - a.profit);
 
+    // Рассчитываем бонусы и формируем топ товаров
     sellerStats.forEach((seller, index) => {
-        seller.bonus = calculateBonus(index, sellerStats.length, seller);
+        // Для расчета бонуса временно добавляем поле profit_cents
+        const sellerWithCents = {
+            ...seller,
+            profit_cents: Math.round(seller.profit * 100)
+        };
+
+        seller.bonus = calculateBonus(index, sellerStats.length, sellerWithCents);
 
         const sortedProducts = Object.entries(seller.products_sold)
             .map(([sku, quantity]) => ({ sku, quantity }))
@@ -87,11 +91,12 @@ function analyzeSalesData(data, options) {
         seller.top_products = sortedProducts;
     });
 
+    // Финальное округление только при выводе
     return sellerStats.map(seller => ({
         seller_id: seller.id,
         name: seller.name,
-        revenue: +(seller.revenue_cents / 100).toFixed(2),
-        profit: +(seller.profit_cents / 100).toFixed(2),
+        revenue: +(seller.revenue).toFixed(2),
+        profit: +(seller.profit).toFixed(2),
         sales_count: seller.sales_count,
         top_products: seller.top_products,
         bonus: +(+seller.bonus).toFixed(2)
