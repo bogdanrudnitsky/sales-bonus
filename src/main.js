@@ -67,9 +67,9 @@ function analyzeSalesData(data, options) {
             const cost = product.purchase_price * item.quantity;
             const profit = revenue - cost;
 
-            // аккумулируем с округлением, чтобы не накапливались плавающие ошибки
-            seller.revenue = Math.round((seller.revenue + revenue) * 100) / 100;
-            seller.profit = Math.round((seller.profit + profit) * 100) / 100;
+            // без промежуточного округления — суммируем как есть
+            seller.revenue += revenue;
+            seller.profit += profit;
 
             seller.products_sold[item.sku] = (seller.products_sold[item.sku] || 0) + item.quantity;
         });
